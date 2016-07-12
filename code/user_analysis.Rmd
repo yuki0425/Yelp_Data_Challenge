@@ -1,0 +1,284 @@
+---
+title: "STA242 PROJECT"
+author: "Jiexuan Cao (912490041)"
+date: "May 20, 2015"
+output: pdf_document
+---
+
+
+```{r}
+rm(list = ls(all = TRUE))
+library("rjson")
+load("~/Documents/242/project/subuser.rda")
+load("~/Documents/242/project/subdata.rda")
+load("~/Documents/242/project/business_index.rda")
+
+#get the business, review and user data of phoneix
+user_id = sapply(1:length(sub_review), function(i) sub_review[[i]]$user_id)
+business_id = sapply(1:length(sub_review), function(i) sub_review[[i]]$business_id)
+
+pho_business = sub_business[business_index[[3]]]
+pho_business_id = sapply(1:length(pho_business), function(i) pho_business[[i]]$business_id)
+pho_business_category = sapply(1:length(pho_business), function(i) pho_business[[i]]$categories)
+
+pho_review = list()
+n = 1
+for (i in 1:length(sub_review)){
+  if (any(sub_review[[i]]$business_id == pho_business_id)){
+    pho_review[[n]] = sub_review[[i]]
+    n = n +1
+  }
+}
+
+pho_user_id = sapply(1:length(pho_review), function(i) pho_review[[i]]$user_id)
+pho_user = list()
+n = 1
+for (i in 1:length(sub_user)){
+  if (any(sub_user[[i]]$user_id == pho_user_id)){
+    pho_user[[n]] = sub_user[[i]]
+    n = n +1
+  }
+}
+
+#pho_user_id is the user who review the restaurant
+#get the pho user's reviewd restuarant
+pho_user_business = replicate(length(pho_user), list())
+pho_user_business = lapply(1:length(pho_user), function(i) {  
+ sapply(which(pho_user_id == pho_user[[i]]$user_id), function(j) pho_review[[j]]$business_id)
+})
+names(pho_user_business) = sapply(1:length(pho_user), function(i) pho_user[[i]]$user_id)
+#length(pho_user_business)
+#45867
+
+pho_review_num = sapply(1:length(pho_user_business), function(i) length(pho_user_business[[i]]))
+
+#recommend user whoes review number > 5
+pho_recom_user = pho_user_business[which(pho_review_num > 5)]
+
+
+#get every recommend user's resturant category
+pho_recom_user_category = replicate(length(pho_recom_user), list())
+for(i in 1:length(pho_recom_user)){
+  tmp1 = NULL
+  for(j in 1:length(pho_recom_user[[i]])){
+  
+    for(k in 1:length(pho_business)) {
+      
+      if (pho_business[[k]]$business_id == pho_recom_user[[i]][j]){
+        tmp = pho_business[[k]]$categories
+        tmp1 = c(tmp1,tmp)
+      }
+    }
+    
+  }
+  pho_recom_user_category[[i]] = tmp1[tmp1 !='Restaurants']
+}
+names(pho_recom_user_category) = names(pho_recom_user)
+
+#get every recommend user's resturant category which he often goes to
+pho_recom_user_category1 = replicate(length(pho_recom_user_category),list())
+for(i in 1:length(pho_recom_user_category)){
+  tmp = sort(table(pho_recom_user_category[[i]]),decreasing = T) / length(pho_recom_user_category[[i]])
+  pho_recom_user_category1[[i]] =tmp[1]  #: min(which(cumsum(tmp) > 0.2))
+}
+names(pho_recom_user_category1) = names(pho_recom_user_category)
+
+#find the similar restaurant for the recommend users
+pho_recom_user_business = replicate(length(pho_recom_user), list())
+for(i in 1:length(pho_recom_user_category1)){
+  tmp1 = NULL
+  for(j in 1:length(pho_recom_user_category1[[i]])){
+  
+    for(k in 1:length(pho_business)) {
+      
+      if (any(pho_business[[k]]$categories == names(pho_recom_user_category1[[i]])[[j]])
+          & pho_business[[k]]$stars > 4){
+        tmp = pho_business[[k]]$business_id
+        tmp1 = c(tmp1,tmp)
+      }
+    }
+    
+  }
+  pho_recom_user_business[[i]] = tmp1
+}
+names(pho_recom_user_business) = names(pho_recom_user_category)
+
+#recommend restuarant to users not include the restuarant he has been to
+pho_recom_user_business1 = sapply(1:length(pho_recom_user), function(i) pho_recom_user_business[[i]][which(!pho_recom_user_business[[i]] %in% pho_recom_user[[i]])])
+names(pho_recom_user_business1) = names(pho_recom_user_category)
+
+
+####cluster the users
+#different kind of food in each city
+pho_user_cluster = matrix(rep(0,8*length(pho_user)),ncol = 8)
+colnames(pho_user_cluster) = c('year','month', 'votes_funny','votes_useful','votes_cool', 'review_count', 'average_stars', "start")
+rownames(pho_user_cluster) = sapply(1:length(pho_user), function(i) pho_user[[i]]$user_id)
+
+yelping_since = sapply(1:length(pho_user), function(i) pho_user[[i]]$yelping_since)
+
+pho_user_cluster[,1] = sapply(1:length(pho_user), function(i) as.numeric(unlist(strsplit(yelping_since[[i]], split = "-")))[1])
+pho_user_cluster[,2] = sapply(1:length(pho_user), function(i) as.numeric(unlist(strsplit(yelping_since[[i]], split = "-")))[2])
+pho_user_cluster[,3] = sapply(1:length(pho_user), function(i) pho_user[[i]]$votes$funny)
+pho_user_cluster[,4] = sapply(1:length(pho_user), function(i) pho_user[[i]]$votes$useful)
+pho_user_cluster[,5] = sapply(1:length(pho_user), function(i) pho_user[[i]]$votes$cool)
+pho_user_cluster[,6] = sapply(1:length(pho_user), function(i) pho_user[[i]]$review_count)
+pho_user_cluster[,7] = sapply(1:length(pho_user), function(i) pho_user[[i]]$average_stars)
+pho_user_cluster[,8] = sapply(1:length(pho_user), function(i) (pho_user_cluster[i,1] - min(pho_user_cluster[,1]))*12 + pho_user_cluster[i,2])
+
+#plot basic infomration of users
+x1 <- pho_user_cluster[,7] 
+hist(x1,freq=FALSE, col="red", xlab="stars", 
+    main="The Rate Stars Distribution of Users in Phoenix")
+lines(density(x1), col="blue", lwd=2)
+
+x2 <- pho_user_cluster[,8] 
+hist(x2,freq=T, col="red", xlab="month number since Jan 2004", 
+    main="The Used Time Distribution of Users in Phoenix")
+lines(density(x2), col="blue", lwd=2)
+
+#kmeans
+km.out=kmeans(pho_user_cluster[,-c(1,2)],3)
+pho_cluster_result = km.out$cluster
+#plot
+par(mfrow = c(1,2))
+plot(pho_user_cluster[,3],pho_user_cluster[,6 ], col=(km.out$cluster+1), xlab ="votes_funny", ylab="review_count", pch=20, cex = 2)
+plot(pho_user_cluster[,6],pho_user_cluster[,7 ], col=(km.out$cluster+1), xlab ="review_count", ylab="average_stars", pch=20, cex = 2)
+mtext("K-Means Clustering for the Phoenix Users (K=3)", side =3, line = 1.5, cex = 1.3,adj=1)
+
+
+cluster1 = pho_user_cluster[which(rownames(pho_user_cluster) %in% names(which(pho_cluster_result == 1))),]
+cluster2 = pho_user_cluster[which(rownames(pho_user_cluster) %in% names(which(pho_cluster_result == 2))),]
+cluster3 = pho_user_cluster[which(rownames(pho_user_cluster) %in% names(which(pho_cluster_result == 3))),]
+
+#rate for different kind of restuarant of each user
+foodcategory = c('American (Traditional)','American (New)','Chinese','Japanese','Indian','Italian', 'French', 'Mexican','Thai' )
+#get every user's review restuarant and it's rate
+pho_user_bus_rate = replicate(length(pho_user), list())
+pho_user_bus_rate = lapply(1:length(pho_user), function(i) {  
+ sapply(which(pho_user_id == pho_user[[i]]$user_id), function(j) c(pho_review[[j]]$business_id,pho_review[[j]]$stars))
+})
+names(pho_user_bus_rate) = sapply(1:length(pho_user), function(i) pho_user[[i]]$user_id)
+
+category_rate = matrix(rep(0,10*length(pho_user_bus_rate)),ncol = 10)
+colnames(category_rate) = c(foodcategory,'others')
+rownames(category_rate) = sapply(1:length(pho_user), function(i) pho_user[[i]]$user_id)
+
+for(i in 1:length(pho_user_bus_rate)){
+  r1 = replicate(10, list())
+  for(j in 1:(length(pho_user_bus_rate[[i]])/2)){
+  
+    for(k in 1:length(pho_business)) {
+      
+      if (pho_business[[k]]$business_id == pho_user_bus_rate[[i]][1,j]){
+        tmp = pho_business[[k]]$categories
+        r = as.numeric(pho_user_bus_rate[[i]][2,j])
+        if (any(foodcategory %in% tmp)){
+          index = which(foodcategory %in% tmp)       
+          for (q in index){
+            r1[[q]] = c(r1[[q]],r)
+          }          
+        }
+        else{
+          r1[[10]] = c(r1[[10]],r)
+        }
+
+      }
+      
+    }
+    
+  }
+  category_rate[i,] = sapply(1:10, function(x) mean(unlist(r1[[x]])))
+}
+
+
+
+category_rate_frame = as.data.frame(category_rate)
+category_rate_frame$category_recommend = sapply(1:length(category_rate[,1]), function(i) unlist(names(which(category_rate[i,] == max(category_rate[i,], na.rm = TRUE)))))
+category_rate_frame$highest = sapply(1:length(category_rate[,1]), function(i) max(category_rate[i,], na.rm = TRUE))
+category_rate_frame$category = sapply(1:length(category_rate[,1]), function(i) paste(category_rate_frame$category_recommend[[i]],collapse = ","))
+
+pho_re_userbyrate = category_rate_frame[category_rate_frame$category_recommend != "others" & category_rate_frame$highest > 3,]
+pho_re_userbyrate$recommend = sapply(1:length(pho_re_userbyrate[,1]), function(i) pho_re_userbyrate[i,11][[1]][which(!pho_re_userbyrate[i,11][[1]] %in% "others")])
+
+
+#find the similar restaurant for the recommend users
+pho_re_user_business = replicate(length(pho_re_userbyrate[,1]), list())
+for(i in 1:length(pho_re_userbyrate[,1])){
+  tmp1 = NULL
+  for(j in 1:length(pho_re_userbyrate[i,14][[1]])){
+  
+    for(k in 1:length(pho_business)) {
+      
+      if (any(pho_business[[k]]$categories == pho_re_userbyrate[i,14][[1]][j])
+          & pho_business[[k]]$stars > 4){
+        tmp = pho_business[[k]]$business_id
+        tmp1 = c(tmp1,tmp)
+      }
+    }
+    
+  }
+  pho_re_user_business[[i]] = tmp1
+}
+names(pho_re_user_business) = rownames(pho_re_userbyrate)
+
+#recommend restuarant to users not include the restuarant he has been to
+pho_re_user_business1 = replicate(length(pho_re_user_business), list())
+for(i in 1:length(pho_re_user_business)){
+  
+  for (k in 1:length(pho_user_business)){
+    if (names(pho_re_user_business)[[i]] == names(pho_user_business)[[k]]){
+      pho_re_user_business1[[i]] = 
+        pho_re_user_business[[i]][which(!pho_re_user_business[[i]] %in% pho_user_business[[k]])]
+    }
+  }
+
+}
+names(pho_re_user_business1) = names(pho_re_user_business)
+
+#combine two methods' result together to do restuarant recommendation
+#the two results data are pho_re_user_business1 and pho_recom_user_business1
+all_user_rec = union(names(pho_re_user_business1), names(pho_recom_user_business1))
+dif1 = setdiff(all_user_rec, names(pho_re_user_business1))
+dif2 = setdiff(all_user_rec, names(pho_recom_user_business1))
+commen = setdiff(all_user_rec, union(dif1,dif2))
+part1 = pho_recom_user_business1[which(names(pho_recom_user_business1) %in% dif1)]
+part2 = pho_re_user_business1[which(names(pho_re_user_business1) %in% dif2)]
+
+part3.1 = pho_recom_user_business1[which(names(pho_recom_user_business1) %in% commen)]
+part3.2 = pho_re_user_business1[which(names(pho_re_user_business1) %in% commen)]
+
+part_good = sapply(1:length(part3.1), function(i) intersect(part3.1[[i]], part3.2[[i]]))
+names(part_good) = names(part3.1)
+part_good = part_good[lapply(part_good,length)>0]
+
+part3 = sapply(1:length(part3.1), function(i) unique(c(part3.1[[i]], part3.2[[i]])))
+names(part3) = names(part3.1)
+
+part = replicate(length(part1) + length(part2) + length(part3), list())
+for(i in 1:length(part1)){
+  part[[i]] = part1[[i]]
+  names(part)[[i]] = names(part1)[[i]]
+}
+for(i in 1:length(part2)){
+  part[[length(part1)+i]] = part2[[i]]
+  names(part)[[length(part1)+i]] = names(part2)[[i]]
+}
+for(i in 1:length(part3)){
+  part[[length(part1)+length(part2)+i]] = part3[[i]]
+  names(part)[[length(part1)+length(part2)+i]] = names(part3)[[i]]
+}
+
+dif = setdiff(names(part), names(part_good))
+part_bad = part[which(names(part) %in% dif)]
+
+#part_good is the restuarants which two methods both have recommended
+#part_good is the restuarants which only one of two methods has recommended
+
+save(part_bad ,file="~/Documents/242/project/sta242_project/result/recommend_restuarant_onemethod.Rda")
+save(part_good ,file="~/Documents/242/project/sta242_project/result/recommend_restuarant_twomethods.Rda")
+
+
+
+
+```
+
